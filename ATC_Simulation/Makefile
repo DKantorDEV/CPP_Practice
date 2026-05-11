@@ -1,6 +1,16 @@
 CXX      = g++
 CXXFLAGS = -std=c++17 -Wall
-SFML     = -lsfml-graphics -lsfml-window -lsfml-system
+
+UNAME := $(shell uname -s)
+ifeq ($(UNAME), Darwin)
+    SFML_INC = -I/opt/homebrew/include
+    SFML_LIB = -L/opt/homebrew/lib
+else
+    SFML_INC =
+    SFML_LIB =
+endif
+
+SFML = $(SFML_INC) $(SFML_LIB) -lsfml-graphics -lsfml-window -lsfml-system
 
 all: radarTower atc_gui
 

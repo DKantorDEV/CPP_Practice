@@ -62,7 +62,9 @@ class Aircraft {
     void setAltitude(int alt) { altitude = alt; }
     void setSpeed(double spd) { speed = spd; }
 
-    // --- EMERGENCY PROTOCOL --- 
+    virtual ~Aircraft() = default;
+
+    // --- EMERGENCY PROTOCOL ---
     virtual void emergencyProtocol() {}
 
     // --- PRINT INFO ---

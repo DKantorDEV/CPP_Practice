@@ -22,6 +22,15 @@ struct Blip {
     float speed;   // how fast the blip orbits (radians per tick)
 };
 
+// SFML 3 changed the Text constructor to (font, string, size); SFML 2 was (string, font, size)
+static sf::Text makeText(const sf::Font& font, const std::string& str, unsigned size) {
+#if SFML_VERSION_MAJOR >= 3
+    return sf::Text(font, str, size);
+#else
+    return sf::Text(str, font, size);
+#endif
+}
+
 sf::Color statusColor(AircraftStatus s) {
     if (s == GROUNDED)  return sf::Color(100, 100, 100);
     if (s == TAKEOFF)   return sf::Color(255, 200,   0);
@@ -43,11 +52,26 @@ void moveBlip(Blip& b, Aircraft* ac) {
 int main() {
     srand((unsigned)time(nullptr));
 
+#if SFML_VERSION_MAJOR >= 3
+    sf::RenderWindow win(sf::VideoMode({(unsigned)W, (unsigned)H}), "ATC Radar Tower");
+#else
     sf::RenderWindow win(sf::VideoMode(W, H), "ATC Radar Tower");
+#endif
     win.setFramerateLimit(60);
+#if SFML_VERSION_MAJOR >= 3
+    win.setView(sf::View(sf::FloatRect({0.f, 0.f}, {(float)W, (float)H})));
+#else
+    win.setView(sf::View(sf::FloatRect(0, 0, W, H)));
+#endif
 
     sf::Font font;
+#ifdef __APPLE__
+    (void)font.openFromFile("/System/Library/Fonts/Menlo.ttc");
+#elif SFML_VERSION_MAJOR >= 3
+    (void)font.openFromFile("/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf");
+#else
     font.loadFromFile("/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf");
+#endif
 
     // --- Create aircraft ---
     std::vector<Aircraft*> planes;
@@ -77,43 +101,78 @@ int main() {
     while (win.isOpen()) {
 
         // --- Events ---
-        sf::Event ev;
-        while (win.pollEvent(ev)) {
-            if (ev.type == sf::Event::Closed) win.close();
+#if SFML_VERSION_MAJOR >= 3
+        while (auto event = win.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) win.close();
 
-            if (ev.type == sf::Event::KeyPressed && ev.key.code == sf::Keyboard::Space)
-                paused = !paused;
+            if (event->is<sf::Event::Resized>())
+                win.setView(sf::View(sf::FloatRect({0.f, 0.f}, {(float)W, (float)H})));
 
-            if (ev.type == sf::Event::MouseButtonPressed) {
-                float mx = (float)ev.mouseButton.x;
-                float my = (float)ev.mouseButton.y;
+            if (const auto* kev = event->getIf<sf::Event::KeyPressed>()) {
+                if (kev->code == sf::Keyboard::Key::Space) paused = !paused;
+            }
 
-                // Click on radar to select a blip
+            if (const auto* mev = event->getIf<sf::Event::MouseButtonPressed>()) {
+                auto mapped = win.mapPixelToCoords(sf::Vector2i(mev->position));
+                float mx = mapped.x;
+                float my = mapped.y;
+
                 if (mx < PANEL) {
                     selected = -1;
                     for (int i = 0; i < (int)planes.size(); i++) {
                         float bx = RX + cosf(blips[i].angle) * blips[i].dist * RR;
                         float by = RY + sinf(blips[i].angle) * blips[i].dist * RR;
-                        if ((mx-bx)*(mx-bx) + (my-by)*(my-by) < 144) { selected = i; break; }
+                        if ((mx-bx)*(mx-bx) + (my-by)*(my-by) < 225) { selected = i; break; }
                     }
-                }
-
-                // Click on list row to select
-                if (mx > PANEL) {
-                    int idx = (int)((my - 60) / 55);
-                    if (idx >= 0 && idx < (int)planes.size()) selected = idx;
-                }
-
-                // Click status buttons (bottom of panel)
-                if (selected >= 0 && my > H - 55) {
+                } else if (selected >= 0 && my >= H - 50 && my < H - 22) {
+                    // Status buttons: exact y range matches drawn button (H-50 to H-22)
                     AircraftStatus map[] = { TAKEOFF, LANDING, GROUNDED, EMERGENCY };
                     for (int b = 0; b < 4; b++) {
                         float bx = PANEL + 8 + b * 73;
                         if (mx >= bx && mx < bx + 68) planes[selected]->setStatus(map[b]);
                     }
+                } else if (mx > PANEL) {
+                    int idx = (int)((my - 60) / 55);
+                    if (idx >= 0 && idx < (int)planes.size()) selected = idx;
                 }
             }
         }
+#else
+        sf::Event ev;
+        while (win.pollEvent(ev)) {
+            if (ev.type == sf::Event::Closed) win.close();
+
+            if (ev.type == sf::Event::Resized)
+                win.setView(sf::View(sf::FloatRect(0, 0, W, H)));
+
+            if (ev.type == sf::Event::KeyPressed && ev.key.code == sf::Keyboard::Space)
+                paused = !paused;
+
+            if (ev.type == sf::Event::MouseButtonPressed) {
+                sf::Vector2f mapped = win.mapPixelToCoords(sf::Vector2i(ev.mouseButton.x, ev.mouseButton.y));
+                float mx = mapped.x;
+                float my = mapped.y;
+
+                if (mx < PANEL) {
+                    selected = -1;
+                    for (int i = 0; i < (int)planes.size(); i++) {
+                        float bx = RX + cosf(blips[i].angle) * blips[i].dist * RR;
+                        float by = RY + sinf(blips[i].angle) * blips[i].dist * RR;
+                        if ((mx-bx)*(mx-bx) + (my-by)*(my-by) < 225) { selected = i; break; }
+                    }
+                } else if (selected >= 0 && my >= H - 50 && my < H - 22) {
+                    AircraftStatus map[] = { TAKEOFF, LANDING, GROUNDED, EMERGENCY };
+                    for (int b = 0; b < 4; b++) {
+                        float bx = PANEL + 8 + b * 73;
+                        if (mx >= bx && mx < bx + 68) planes[selected]->setStatus(map[b]);
+                    }
+                } else if (mx > PANEL) {
+                    int idx = (int)((my - 60) / 55);
+                    if (idx >= 0 && idx < (int)planes.size()) selected = idx;
+                }
+            }
+        }
+#endif
 
         // --- Simulation tick every 0.9 s ---
         if (!paused && tickClock.getElapsedTime().asSeconds() > 0.9f) {
@@ -132,9 +191,10 @@ int main() {
         win.clear(sf::Color(8, 12, 18));
 
         // Radar background + rings
+        // setOrigin/setPosition accept Vector2f in both SFML 2 and 3
         sf::CircleShape radarBg(RR);
-        radarBg.setOrigin(RR, RR);
-        radarBg.setPosition(RX, RY);
+        radarBg.setOrigin(sf::Vector2f{RR, RR});
+        radarBg.setPosition(sf::Vector2f{RX, RY});
         radarBg.setFillColor(sf::Color(10, 24, 14));
         radarBg.setOutlineColor(sf::Color(0, 60, 28));
         radarBg.setOutlineThickness(2);
@@ -143,8 +203,8 @@ int main() {
         for (int r = 1; r <= 4; r++) {
             float rr = RR * r / 4.f;
             sf::CircleShape ring(rr);
-            ring.setOrigin(rr, rr);
-            ring.setPosition(RX, RY);
+            ring.setOrigin(sf::Vector2f{rr, rr});
+            ring.setPosition(sf::Vector2f{RX, RY});
             ring.setFillColor(sf::Color::Transparent);
             ring.setOutlineColor(sf::Color(0, 40, 18));
             ring.setOutlineThickness(1);
@@ -152,7 +212,11 @@ int main() {
         }
 
         // Sweep line
+#if SFML_VERSION_MAJOR >= 3
+        sf::VertexArray sl(sf::PrimitiveType::Lines, 2);
+#else
         sf::VertexArray sl(sf::Lines, 2);
+#endif
         sl[0].position = sf::Vector2f(RX, RY);                                      sl[0].color = sf::Color(0, 200, 90, 180);
         sl[1].position = sf::Vector2f(RX + cosf(sweep)*RR, RY + sinf(sweep)*RR);    sl[1].color = sf::Color::Transparent;
         win.draw(sl);
@@ -165,43 +229,47 @@ int main() {
             if (planes[i]->getStatus() == EMERGENCY && flash) col = sf::Color::White;
 
             if (i == selected) {
-                sf::CircleShape ring(13); ring.setOrigin(13, 13); ring.setPosition(bx, by);
+                sf::CircleShape ring(13);
+                ring.setOrigin(sf::Vector2f{13.f, 13.f});
+                ring.setPosition(sf::Vector2f{bx, by});
                 ring.setFillColor(sf::Color::Transparent);
                 ring.setOutlineColor(sf::Color(255, 255, 255, 140));
                 ring.setOutlineThickness(1.5f);
                 win.draw(ring);
             }
 
-            sf::CircleShape dot(7); dot.setOrigin(7, 7); dot.setPosition(bx, by);
+            sf::CircleShape dot(7);
+            dot.setOrigin(sf::Vector2f{7.f, 7.f});
+            dot.setPosition(sf::Vector2f{bx, by});
             dot.setFillColor(col);
             win.draw(dot);
 
-            sf::Text label(planes[i]->getCallSign(), font, 10);
+            sf::Text label = makeText(font, planes[i]->getCallSign(), 10);
             label.setFillColor(sf::Color(150, 200, 150));
-            label.setPosition(bx + 10, by - 8);
+            label.setPosition(sf::Vector2f{bx + 10, by - 8});
             win.draw(label);
         }
 
         // Panel divider
         sf::RectangleShape div(sf::Vector2f(2, H));
-        div.setPosition(PANEL, 0);
+        div.setPosition(sf::Vector2f{PANEL, 0});
         div.setFillColor(sf::Color(0, 55, 25));
         win.draw(div);
 
         // Panel header
-        sf::Text title("FLIGHT LIST", font, 13);
+        sf::Text title = makeText(font, "FLIGHT LIST", 13);
         title.setFillColor(sf::Color(0, 185, 85));
-        title.setPosition(PANEL + 8, 8);
+        title.setPosition(sf::Vector2f{PANEL + 8, 8});
         win.draw(title);
 
-        sf::Text tickTxt("TICK: " + std::to_string(tick) + (paused ? "  [PAUSED]" : ""), font, 11);
+        sf::Text tickTxt = makeText(font, "TICK: " + std::to_string(tick) + (paused ? "  [PAUSED]" : ""), 11);
         tickTxt.setFillColor(paused ? sf::Color(255, 200, 0) : sf::Color(50, 90, 50));
-        tickTxt.setPosition(PANEL + 8, 28);
+        tickTxt.setPosition(sf::Vector2f{PANEL + 8, 28});
         win.draw(tickTxt);
 
-        sf::Text hint("SPACE = pause | click to select", font, 9);
+        sf::Text hint = makeText(font, "SPACE = pause | click to select", 9);
         hint.setFillColor(sf::Color(35, 60, 35));
-        hint.setPosition(PANEL + 8, 46);
+        hint.setPosition(sf::Vector2f{PANEL + 8, 46});
         win.draw(hint);
 
         // Aircraft list rows
@@ -212,22 +280,22 @@ int main() {
 
             if (i == selected) {
                 sf::RectangleShape hi(sf::Vector2f(W - PANEL - 4, 53));
-                hi.setPosition(PANEL + 2, ry);
+                hi.setPosition(sf::Vector2f{PANEL + 2, ry});
                 hi.setFillColor(sf::Color(18, 35, 22));
                 win.draw(hi);
             }
 
-            sf::Text model(planes[i]->getModel(), font, 12);
+            sf::Text model = makeText(font, planes[i]->getModel(), 12);
             model.setFillColor(sf::Color(195, 220, 195));
-            model.setPosition(PANEL + 10, ry + 2);
+            model.setPosition(sf::Vector2f{PANEL + 10, ry + 2});
             win.draw(model);
 
             std::string info = planes[i]->statusToString()
                 + "  " + std::to_string(planes[i]->getAltitude()) + "ft"
                 + "  " + std::to_string((int)planes[i]->getSpeed()) + "mph";
-            sf::Text infoTxt(info, font, 10);
+            sf::Text infoTxt = makeText(font, info, 10);
             infoTxt.setFillColor((em && flash) ? sf::Color::White : col);
-            infoTxt.setPosition(PANEL + 10, ry + 19);
+            infoTxt.setPosition(sf::Vector2f{PANEL + 10, ry + 19});
             win.draw(infoTxt);
         }
 
@@ -241,15 +309,15 @@ int main() {
                 bool current = planes[selected]->getStatus() == map[b];
 
                 sf::RectangleShape btn(sf::Vector2f(68, 28));
-                btn.setPosition(bx, H - 50);
+                btn.setPosition(sf::Vector2f{bx, (float)(H - 50)});
                 btn.setFillColor(current ? sf::Color(bc.r/5, bc.g/5, bc.b/5) : sf::Color(12, 18, 24));
                 btn.setOutlineColor(bc);
                 btn.setOutlineThickness(1.5f);
                 win.draw(btn);
 
-                sf::Text btnTxt(labels[b], font, 11);
+                sf::Text btnTxt = makeText(font, labels[b], 11);
                 btnTxt.setFillColor(bc);
-                btnTxt.setPosition(bx + 4, H - 44);
+                btnTxt.setPosition(sf::Vector2f{bx + 4, (float)(H - 44)});
                 win.draw(btnTxt);
             }
         }
